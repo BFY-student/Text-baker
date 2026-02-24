@@ -174,7 +174,7 @@
         }
 
         .output-area:empty::before {
-            content: 'Polished text will appear here...';
+            content: 'Output will appear here...';
             color: #555;
         }
 
@@ -477,7 +477,7 @@
 
                 <div class="settings-group">
                     <label>Purpose / Register</label>
-                    <input type="range" id="register" min="0" max="4" value="2" step="1">
+                    <input type="range" id="register" min="0" max="5" value="2" step="1">
                     <span class="slider-value" id="register-value">Neutral</span>
                 </div>
 
@@ -499,6 +499,8 @@
                 <textarea id="input-text" placeholder="Paste or type your text here..."></textarea>
                 <div class="button-group">
                     <button id="polish-btn">Polish Text</button>
+                    <button id="humanize-btn" style="background: #7c4dff;">Humanize Text</button>
+                    <button id="polish-humanize-btn" style="background: #e65100;">Polish & Humanize</button>
                     <button class="secondary" onclick="clearAll()">Clear All</button>
                 </div>
                 <div class="loading" id="loading">Processing...</div>
@@ -508,8 +510,11 @@
             <!-- Polished Output (Right) -->
             <div class="panel">
                 <div class="section-title">
-                    <h3>Polished Output</h3>
-                    <button class="secondary" id="copy-btn" onclick="copyCleanText(this)">Copy Clean Text</button>
+                    <h3>Output</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="secondary" id="toggle-marks-btn" onclick="toggleRevisionMarks()" style="display: none;">Show Plain</button>
+                        <button class="secondary" id="copy-btn" onclick="copyCleanText(this)">Copy Clean Text</button>
+                    </div>
                 </div>
                 <div class="output-area revision-mark" id="output"></div>
             </div>
@@ -559,12 +564,70 @@
 
     <script>
         // Configuration and State
-        const registerLabels = ['Formal', 'Semi-formal', 'Neutral', 'Semi-casual', 'Casual'];
+        const registerLabels = ['Formal', 'Semi-formal', 'Neutral', 'Semi-casual', 'Casual', 'Technical'];
         const intensityLabels = ['Grammar only', 'Light touch', 'Moderate', 'Heavy rewrite', 'Full rephrase'];
+        const genreMapping = ['academic-stem', 'academic-humanities', 'journalistic', 'business', 'informal', 'technical'];
+
+        const HUMANIZE_SYSTEM_PROMPT = `You are a text humanization engine. Your task is to rewrite the provided text so that it reads as though written by an experienced human author in the specified genre, while preserving the original meaning with high fidelity.
+
+You must follow a strict priority ordering when making changes. If a lower-priority transformation would violate a higher-priority constraint, discard the lower-priority transformation.
+
+PRIORITY 1 — SEMANTIC FIDELITY (highest, inviolable)
+Every factual claim, logical relationship, named entity, numerical value, and citation in the source must be preserved exactly in the output. Do not add information, infer claims, or remove qualifications. The rewritten text must be logically entailed by the source text and vice versa.
+
+PRIORITY 2 — REGISTER CONFORMITY
+Conform all stylistic choices to the specified genre. Apply the following genre-specific parameters:
+
+- academic-stem: Mean sentence length 18–22 words, high noun-to-verb ratio, low adjective density, readability Flesch-Kincaid 12–14, formal tone, no contractions, no colloquialisms, IMRaD-compatible structure if applicable. CRITICAL: Avoid first-person pronouns (we, our, us, I, my). Use passive voice, third-person constructions, or impersonal expressions. Example: "The experiment was conducted" not "We conducted the experiment."
+- academic-humanities: Mean sentence length 25–30 words with higher variance, richer adjective use, readability Flesch-Kincaid 14–16, permits complex nested argumentation and longer discursive passages. CRITICAL: Avoid first-person pronouns (we, our, us, I, my). Use passive voice or third-person scholarly voice. Example: "This analysis demonstrates" not "We demonstrate."
+- journalistic: Mean sentence length 15–20 words, high noun-to-pronoun ratio (use named entities over pronouns where possible), readability Gunning-Fog 8–10, lead-heavy structure with front-loaded key information.
+- business: Mean sentence length 12–18 words, low type-token ratio (use standard business vocabulary), active voice and imperative structures, readability Flesch-Kincaid 8–11, action-oriented phrasing.
+- informal: Mean sentence length 5–12 words with extreme variance, high pronoun density, very low type-token ratio, permits fragments, run-ons, contractions, and discourse markers.
+- technical: Highly constrained domain vocabulary with rapid lexical closure (reuse the same terms consistently; do not rotate synonyms for technical terms), permits verbless fragments and noun-phrase lists, readability ARI 7–9, flat dependency structures. Avoid first-person pronouns in formal technical documentation.
+
+PRIORITY 3 — SYNTACTIC RESTRUCTURING
+Apply the following structural transformations to break AI-generated rhythmic uniformity:
+
+3a. Vary sentence length deliberately (burstiness). Do not produce sequences of three or more consecutive sentences with similar word counts. Alternate between longer complex sentences and short declarative or fragmentary statements. The standard deviation of sentence lengths within each paragraph should be high relative to the mean.
+
+3b. Reduce dependency distance. Keep subjects close to their main verbs. If a subject is separated from its verb by more than two intervening clauses or approximately 15 words, restructure the sentence: split it, reorder constituents, or convert a relative clause to a separate sentence. Target a mean dependency distance below 3.5 for most genres and below 2.5 for technical writing.
+
+3c. Unpack nominalizations. Convert noun-heavy constructions back into active verb forms where the register permits it. "The implementation of the system" becomes "implementing the system" or "we implemented the system" depending on register. "The facilitation of communication" becomes "facilitating communication" or simply "to communicate." Preserve nominalizations only where the genre convention demands them (e.g., established disciplinary terms in academic writing like "crystallization" or "phosphorylation").
+
+3d. Strengthen referential chains. Replace redundant repetitions of full noun phrases with pronouns, demonstratives ("this," "these," "such"), or context-dependent synonyms. Trust the reader to maintain the referential thread. "The neural network architecture... the neural network architecture... the neural network architecture" should become "The architecture... It... the system." Do not over-repeat entity names unless the genre requires disambiguation (e.g., journalistic or legal writing).
+
+PRIORITY 4 — LEXICAL AND PRAGMATIC ADJUSTMENT (lowest, most constrained)
+Apply these substitutions only after syntactic structure is finalized, and only where they do not disrupt the syntax or meaning established in Priorities 1–3:
+
+4a. Eliminate formulaic AI markers. Remove or replace the following patterns:
+- Cliché transitions used as padding: "Furthermore," "Moreover," "It is worth noting that," "In conclusion," "Additionally." Replace with direct conjunctions ("But," "So," "Still," "Yet"), subordination, or simply remove the transition and let the logical connection speak for itself.
+- Overused AI phrases: "delve into," "navigate the complexities of," "a tapestry of," "in today's fast-paced world," "a testament to," "it's important to note," "aims to explore," "shed light on," "at the end of the day." Replace with plain, direct phrasing or delete.
+- Gerund-phrase sentence openers used as filler: "Navigating the complexities of...," "Exploring the nuances of...," "Leveraging the power of...." Restructure into direct statements.
+- Overused intensifiers and hedges that signal AI generation: "significant," "crucial," "vital," "comprehensive," "robust," "noteworthy," "innovative." Use these words only when they carry genuine semantic weight. Otherwise, delete them or use more specific descriptors.
+
+4b. Introduce epistemic markers where appropriate. Absolute claims are an AI signature. Where the source text makes strong assertions that a human expert would naturally qualify, add hedges: "likely," "in most cases," "arguably," "the evidence suggests," "it appears that." Do not over-hedge; apply selectively to 2–4 claims per 500 words where qualification is intellectually honest.
+
+4c. Permit controlled imperfection. Where the register allows (informal, blog, some business writing), introduce natural human stylistic features: starting a sentence with "But" or "And," using an em dash to append an afterthought, employing a rhetorical question, or inserting a mildly colloquial expression. In formal registers (academic, technical), express imperfection through legitimate stylistic variation rather than grammatical informality — e.g., an unusually short sentence for emphasis, or a parenthetical aside.
+
+4d. Temper emotional neutrality. AI text defaults to forced positivity or sterile objectivity. Where the content warrants it, allow mild negative valence: frustration with a methodological limitation, acknowledgment that a result was disappointing, skepticism toward a competing claim. Do not fabricate emotions; only surface negative affect where the source text's logical content implies it.
+
+GLOBAL CONSTRAINTS (apply throughout):
+- Do not introduce any factual claim, statistic, citation, or named entity not present in the source.
+- Do not use the em dash character "\u2014" in the output. Use commas, parentheses, colons, semicolons, or sentence breaks instead.
+- Do not hallucinate references or invent attributions.
+- Preserve all discipline-specific terminology exactly. Do not replace technical terms with synonyms (e.g., do not swap "phosphorylation" for "chemical modification").
+- Preserve the overall argumentative structure and paragraph-level organization of the source. You may merge or split sentences within a paragraph, but do not reorder paragraphs or relocate arguments across sections.
+- The output should be approximately the same length as the input (within ±15%).
+
+Rewrite the text now according to these instructions. Output only the rewritten text with no commentary, preamble, or explanation.`;
 
         let currentProvider = 'openai';
         let isProcessing = false;
         let confirmCallback = null;
+
+        // Output view state
+        let outputView = { marked: '', plain: '' };
+        let isPlainView = false;
 
         // Model suggestions per provider
         const modelSuggestions = {
@@ -575,6 +638,7 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            loadAPIConfig(); // Load saved API configuration
             initializeEventListeners();
             updateModelPlaceholder();
             updateProviderUI();
@@ -586,6 +650,22 @@
                 currentProvider = e.target.value;
                 updateProviderUI();
                 updateModelPlaceholder();
+                saveAPIConfig();
+            });
+
+            // API key change
+            document.getElementById('api-key').addEventListener('input', () => {
+                saveAPIConfig();
+            });
+
+            // Model change
+            document.getElementById('model').addEventListener('input', () => {
+                saveAPIConfig();
+            });
+
+            // Base URL change
+            document.getElementById('base-url').addEventListener('input', () => {
+                saveAPIConfig();
             });
 
             // Slider updates
@@ -597,8 +677,10 @@
                 document.getElementById('intensity-value').textContent = intensityLabels[e.target.value];
             });
 
-            // Polish button
+            // Action buttons
             document.getElementById('polish-btn').addEventListener('click', polishText);
+            document.getElementById('humanize-btn').addEventListener('click', humanizeText);
+            document.getElementById('polish-humanize-btn').addEventListener('click', polishAndHumanize);
 
             // Enter key in textarea
             document.getElementById('input-text').addEventListener('keydown', (e) => {
@@ -623,23 +705,42 @@
 
         function updateProviderUI() {
             const apiKeyGroup = document.getElementById('api-key-group');
+            const apiKeyInput = document.getElementById('api-key');
             const baseUrlInput = document.getElementById('base-url');
 
             if (currentProvider === 'local') {
                 apiKeyGroup.style.display = 'none';
-                baseUrlInput.value = 'http://localhost:11434';
-                baseUrlInput.placeholder = 'http://localhost:11434';
+                // Set default API key for local provider (Ollama doesn't need auth but some code expects a value)
+                if (!apiKeyInput.value) {
+                    apiKeyInput.value = 'ollama';
+                }
+                if (!baseUrlInput.value || baseUrlInput.value === 'https://api.openai.com/v1' || baseUrlInput.value === 'https://generativelanguage.googleapis.com/v1beta') {
+                    baseUrlInput.value = 'http://localhost:11434/v1';
+                }
+                baseUrlInput.placeholder = 'http://localhost:11434/v1';
             } else {
                 apiKeyGroup.style.display = 'block';
 
                 switch(currentProvider) {
                     case 'openai':
-                        baseUrlInput.value = 'https://api.openai.com/v1';
+                        if (!baseUrlInput.value || baseUrlInput.value.includes('localhost') || baseUrlInput.value.includes('generativelanguage')) {
+                            baseUrlInput.value = 'https://api.openai.com/v1';
+                        }
                         baseUrlInput.placeholder = 'https://api.openai.com/v1';
+                        // Clear placeholder API key if switching from local
+                        if (apiKeyInput.value === 'ollama') {
+                            apiKeyInput.value = '';
+                        }
                         break;
                     case 'gemini':
-                        baseUrlInput.value = 'https://generativelanguage.googleapis.com/v1beta';
+                        if (!baseUrlInput.value || baseUrlInput.value.includes('localhost') || baseUrlInput.value.includes('openai')) {
+                            baseUrlInput.value = 'https://generativelanguage.googleapis.com/v1beta';
+                        }
                         baseUrlInput.placeholder = 'https://generativelanguage.googleapis.com/v1beta';
+                        // Clear placeholder API key if switching from local
+                        if (apiKeyInput.value === 'ollama') {
+                            apiKeyInput.value = '';
+                        }
                         break;
                 }
             }
@@ -652,6 +753,43 @@
             const allDefaults = Object.values(modelSuggestions);
             if (!modelInput.value || allDefaults.includes(modelInput.value)) {
                 modelInput.value = modelSuggestions[currentProvider];
+            }
+        }
+
+        function saveAPIConfig() {
+            const config = {
+                provider: document.getElementById('provider').value,
+                apiKey: document.getElementById('api-key').value,
+                model: document.getElementById('model').value,
+                baseUrl: document.getElementById('base-url').value
+            };
+            localStorage.setItem('textBakerAPIConfig', JSON.stringify(config));
+            console.log('API config saved:', config);
+        }
+
+        function loadAPIConfig() {
+            try {
+                const saved = localStorage.getItem('textBakerAPIConfig');
+                if (!saved) return;
+
+                const config = JSON.parse(saved);
+                console.log('Loading saved API config:', config);
+
+                if (config.provider) {
+                    document.getElementById('provider').value = config.provider;
+                    currentProvider = config.provider;
+                }
+                if (config.apiKey) {
+                    document.getElementById('api-key').value = config.apiKey;
+                }
+                if (config.model) {
+                    document.getElementById('model').value = config.model;
+                }
+                if (config.baseUrl) {
+                    document.getElementById('base-url').value = config.baseUrl;
+                }
+            } catch (e) {
+                console.error('Error loading API config:', e);
             }
         }
 
@@ -709,12 +847,15 @@
                     // OpenAI / Local — both use chat completions
                     let targetUrl;
                     if (provider === 'local') {
-                        targetUrl = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '') + '/v1/chat/completions';
+                        targetUrl = (baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '') + '/chat/completions';
                     } else {
                         targetUrl = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '') + '/chat/completions';
                     }
                     const headers = { 'Content-Type': 'application/json' };
-                    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+                    // For local, skip auth if using placeholder key
+                    if (apiKey && (provider !== 'local' || apiKey !== 'ollama')) {
+                        headers['Authorization'] = `Bearer ${apiKey}`;
+                    }
                     const response = await fetch(targetUrl, {
                         method: 'POST',
                         headers: headers,
@@ -751,6 +892,9 @@
         function clearAll() {
             document.getElementById('input-text').value = '';
             document.getElementById('output').innerHTML = '';
+            outputView = { marked: '', plain: '' };
+            isPlainView = false;
+            document.getElementById('toggle-marks-btn').style.display = 'none';
         }
 
         function showError(message) {
@@ -763,10 +907,14 @@
             }, 5000);
         }
 
-        function setLoading(loading) {
+        function setLoading(loading, message = 'Processing...') {
             isProcessing = loading;
-            document.getElementById('loading').classList.toggle('active', loading);
+            const loadingDiv = document.getElementById('loading');
+            loadingDiv.textContent = message;
+            loadingDiv.classList.toggle('active', loading);
             document.getElementById('polish-btn').disabled = loading;
+            document.getElementById('humanize-btn').disabled = loading;
+            document.getElementById('polish-humanize-btn').disabled = loading;
         }
 
         // API Provider Abstraction Layer
@@ -781,20 +929,51 @@
 
             buildPrompt(text, settings) {
                 const { language, register, intensity } = settings;
+                const intensityLevel = intensityLabels[intensity];
+                const registerStyle = registerLabels[register];
 
-                return `Polish this text in ${language}. Style: ${registerLabels[register]}. Intensity: ${intensityLabels[intensity]}.
+                let intensityGuidance = '';
+                switch(intensity) {
+                    case 0: // Grammar only
+                        intensityGuidance = 'Fix only grammatical errors, spelling mistakes, and punctuation. Do not change word choice or sentence structure unless grammatically incorrect.';
+                        break;
+                    case 1: // Light touch
+                        intensityGuidance = 'Fix grammar and make minimal improvements to clarity and word choice. Preserve the original phrasing as much as possible.';
+                        break;
+                    case 2: // Moderate
+                        intensityGuidance = 'Improve grammar, clarity, and word choice. Refine sentence structure where it enhances readability. Balance preservation with improvement.';
+                        break;
+                    case 3: // Heavy rewrite
+                        intensityGuidance = 'Significantly improve grammar, style, and structure. Rewrite awkward or unclear sentences. Prioritize professional quality.';
+                        break;
+                    case 4: // Full rephrase
+                        intensityGuidance = 'Completely rephrase the text for maximum clarity and impact. Restructure sentences and paragraphs as needed. Maintain meaning but optimize expression.';
+                        break;
+                }
 
-Show changes using markdown:
-- New/added words: **word**
-- Deleted words: ~~word~~
-- Completely rephrased sentences: ***entire sentence***
+                let registerGuidance = '';
+                if (registerStyle.includes('Formal') || registerStyle === 'Technical') {
+                    registerGuidance = '\n\nIMPORTANT: For academic and formal writing, avoid first-person pronouns (we, our, us, I, my). Use passive voice, third-person constructions, or impersonal expressions instead. Example: Instead of "We conducted experiments," write "Experiments were conducted" or "The study examined."';
+                }
 
-Output the polished text with markdown markup showing all changes.
+                return `Polish this text in ${language}.
 
-Text:
+Target style: ${registerStyle}
+Polish intensity: ${intensityLevel}
+
+${intensityGuidance}${registerGuidance}
+
+Show ALL changes using markdown markup:
+- Words/phrases you ADD: **added text**
+- Words/phrases you DELETE: ~~deleted text~~
+- Sentences you COMPLETELY REPHRASE: ***entire rephrased sentence***
+
+CRITICAL: You must show ALL edits with the markdown markup above. Do not output clean text without markup.
+
+Text to polish:
 ${text}
 
-Polished version:`;
+Polished version with markup:`;
             }
         }
 
@@ -846,6 +1025,33 @@ Polished version:`;
 
                 return result;
             }
+
+            async call(systemPrompt, userMessage) {
+                const apiKey = this.config.apiKey;
+                const model = this.config.model;
+                const base = (this.config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+                const targetUrl = base + '/chat/completions';
+                const headers = { 'Content-Type': 'application/json' };
+                if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+                const response = await fetch(targetUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: userMessage }
+                        ],
+                        temperature: 0.3
+                    })
+                });
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`API Error: ${response.status} - ${error}`);
+                }
+                const data = await response.json();
+                return data.choices?.[0]?.message?.content || '';
+            }
         }
 
         class GeminiProvider extends APIProvider {
@@ -890,12 +1096,34 @@ Polished version:`;
 
                 return result;
             }
+
+            async call(systemPrompt, userMessage) {
+                const apiKey = this.config.apiKey;
+                const model = this.config.model;
+                const baseUrl = (this.config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
+                const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
+                const body = { contents: [{ parts: [{ text: userMessage }] }] };
+                if (systemPrompt) {
+                    body.systemInstruction = { parts: [{ text: systemPrompt }] };
+                }
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`Gemini API Error: ${response.status} - ${error}`);
+                }
+                const data = await response.json();
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            }
         }
 
         class LocalProvider extends APIProvider {
             async polish(text, settings, onChunk) {
-                const base = (this.config.baseUrl || 'http://localhost:11434').replace(/\/+$/, '');
-                const targetUrl = base + '/v1/chat/completions';
+                const base = (this.config.baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '');
+                const targetUrl = base + '/chat/completions';
                 const model = this.config.model;
                 const prompt = this.buildPrompt(text, settings);
 
@@ -905,7 +1133,10 @@ Polished version:`;
                 ];
 
                 const headers = { 'Content-Type': 'application/json' };
-                if (this.config.apiKey) headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+                // Ollama doesn't require authorization, but include it if provided
+                if (this.config.apiKey && this.config.apiKey !== 'ollama') {
+                    headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+                }
 
                 console.log('Local request to:', targetUrl);
 
@@ -936,6 +1167,35 @@ Polished version:`;
 
                 return result;
             }
+
+            async call(systemPrompt, userMessage) {
+                const base = (this.config.baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '');
+                const targetUrl = base + '/chat/completions';
+                const model = this.config.model;
+                const headers = { 'Content-Type': 'application/json' };
+                // Ollama doesn't require authorization, but include it if provided
+                if (this.config.apiKey && this.config.apiKey !== 'ollama') {
+                    headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+                }
+                const response = await fetch(targetUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: userMessage }
+                        ],
+                        temperature: 0.3
+                    })
+                });
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`Local API Error: ${response.status} - ${error}`);
+                }
+                const data = await response.json();
+                return data.choices?.[0]?.message?.content || '';
+            }
         }
 
         function createProvider() {
@@ -964,65 +1224,110 @@ Polished version:`;
             }
         }
 
-        async function polishText() {
-            if (isProcessing) return;
-
+        function validateInput(actionLabel) {
             const inputText = document.getElementById('input-text').value.trim();
             if (!inputText) {
-                showError('Please enter some text to polish');
-                return;
+                showError(`Please enter some text to ${actionLabel}`);
+                return null;
             }
-
             const provider = document.getElementById('provider').value;
             const apiKey = document.getElementById('api-key').value.trim();
             const model = document.getElementById('model').value.trim();
-
             if (provider !== 'local' && !apiKey) {
                 showError('Please enter your API key');
-                return;
+                return null;
             }
-
             if (!model) {
                 showError('Please enter a model name');
-                return;
+                return null;
             }
+            return inputText;
+        }
 
-            const settings = {
+        function getSettings() {
+            return {
                 language: document.getElementById('language').value,
                 register: parseInt(document.getElementById('register').value),
                 intensity: parseInt(document.getElementById('intensity').value)
             };
+        }
 
-            setLoading(true);
+        function extractCleanFromMarkdown(markdown) {
+            let clean = markdown;
+            // Remove ~~deleted~~ text
+            clean = clean.replace(/~~[^~]+~~/g, '');
+            // Remove *** markers but keep content
+            clean = clean.replace(/\*\*\*([^*]+)\*\*\*/g, '$1');
+            // Remove ** markers but keep content
+            clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1');
+            // Clean up extra spaces
+            clean = clean.replace(/ {2,}/g, ' ').trim();
+            return clean;
+        }
+
+        function setOutput(markedHtml, plainText, startWithPlain = false) {
+            outputView.marked = markedHtml;
+            outputView.plain = plainText;
+            isPlainView = startWithPlain;
+
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML = '<div style="color: #888; font-style: italic;">Processing... Please wait.</div>';
+            const toggleBtn = document.getElementById('toggle-marks-btn');
+
+            // Check if marked and plain views actually differ
+            const plainHtml = escapeHtml(plainText).replace(/\n/g, '<br>');
+            const hasDiff = markedHtml !== plainHtml;
+            toggleBtn.style.display = hasDiff ? 'inline-block' : 'none';
+
+            if (isPlainView) {
+                outputDiv.innerHTML = plainHtml;
+                toggleBtn.textContent = 'Show Marks';
+            } else {
+                outputDiv.innerHTML = markedHtml;
+                toggleBtn.textContent = 'Show Plain';
+            }
+        }
+
+        function toggleRevisionMarks() {
+            isPlainView = !isPlainView;
+            const outputDiv = document.getElementById('output');
+            const toggleBtn = document.getElementById('toggle-marks-btn');
+            if (isPlainView) {
+                outputDiv.innerHTML = escapeHtml(outputView.plain).replace(/\n/g, '<br>');
+                toggleBtn.textContent = 'Show Marks';
+            } else {
+                outputDiv.innerHTML = outputView.marked;
+                toggleBtn.textContent = 'Show Plain';
+            }
+        }
+
+        async function polishText() {
+            if (isProcessing) return;
+            const inputText = validateInput('polish');
+            if (!inputText) return;
+            const settings = getSettings();
+
+            setLoading(true, 'Polishing...');
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML = '<div style="color: #888; font-style: italic;">Polishing... Please wait.</div>';
 
             try {
                 const apiProvider = createProvider();
-                console.log('Starting polish with provider:', provider);
-
                 let fullMarkdown = '';
 
                 await apiProvider.polish(inputText, settings, (result) => {
-                    console.log('Received result:', result);
                     fullMarkdown = result;
-                    // Convert markdown to HTML for display
                     outputDiv.innerHTML = markdownToHtml(fullMarkdown);
                 });
 
-                console.log('Polish complete.');
-                console.log('Full markdown response:', fullMarkdown);
-
-                // If no content received, show message
                 if (!fullMarkdown || !fullMarkdown.trim()) {
-                    console.error('No content received. Response was empty.');
                     outputDiv.innerHTML = '<div style="color: #ff9800;">No response received from the API. Please check your settings and try again.</div>';
                     return;
                 }
 
-                // Save to history (store the HTML version)
                 const fullHtml = markdownToHtml(fullMarkdown);
-                saveToHistory(inputText, fullHtml, settings);
+                const cleanText = extractCleanFromMarkdown(fullMarkdown);
+                setOutput(fullHtml, cleanText, false);
+                saveToHistory(inputText, fullHtml, settings, 'polish');
 
             } catch (error) {
                 outputDiv.innerHTML = '';
@@ -1033,21 +1338,110 @@ Polished version:`;
             }
         }
 
-        function copyCleanText(btn) {
-            const outputDiv = document.getElementById('output');
-            if (!outputDiv.textContent.trim()) {
-                showError('No output to copy');
-                return;
-            }
+        async function humanizeText() {
+            if (isProcessing) return;
+            const inputText = validateInput('humanize');
+            if (!inputText) return;
+            const settings = getSettings();
+            const genre = genreMapping[settings.register] || 'journalistic';
 
-            // Clone the output, remove strikethrough text, and get clean text
-            const clone = outputDiv.cloneNode(true);
-            clone.querySelectorAll('s').forEach(s => {
-                // Replace the <s> node with a single space to avoid double spaces
-                s.replaceWith(' ');
-            });
-            // Collapse multiple spaces into one
-            const cleanText = clone.textContent.replace(/ {2,}/g, ' ');
+            setLoading(true, 'Humanizing...');
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML = '<div style="color: #888; font-style: italic;">Humanizing... Please wait.</div>';
+
+            try {
+                const apiProvider = createProvider();
+                const userMessage = `[GENRE: ${genre}]\n\n<text>\n${inputText}\n</text>`;
+                const result = await apiProvider.call(HUMANIZE_SYSTEM_PROMPT, userMessage);
+
+                if (!result || !result.trim()) {
+                    outputDiv.innerHTML = '<div style="color: #ff9800;">No response received from the API. Please check your settings and try again.</div>';
+                    return;
+                }
+
+                const plainHtml = escapeHtml(result).replace(/\n/g, '<br>');
+                setOutput(plainHtml, result, true);
+                saveToHistory(inputText, plainHtml, settings, 'humanize');
+
+            } catch (error) {
+                outputDiv.innerHTML = '';
+                showError(error.message);
+                console.error('Humanize error:', error);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function polishAndHumanize() {
+            if (isProcessing) return;
+            const inputText = validateInput('polish & humanize');
+            if (!inputText) return;
+            const settings = getSettings();
+            const genre = genreMapping[settings.register] || 'journalistic';
+
+            setLoading(true, 'Step 1/2: Polishing...');
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML = '<div style="color: #888; font-style: italic;">Step 1/2: Polishing... Please wait.</div>';
+
+            try {
+                const apiProvider = createProvider();
+
+                // Step 1: Polish
+                let polishMarkdown = '';
+                await apiProvider.polish(inputText, settings, (result) => {
+                    polishMarkdown = result;
+                    outputDiv.innerHTML = markdownToHtml(polishMarkdown);
+                });
+
+                if (!polishMarkdown || !polishMarkdown.trim()) {
+                    outputDiv.innerHTML = '<div style="color: #ff9800;">No response from polish step. Please check your settings and try again.</div>';
+                    return;
+                }
+
+                const polishHtml = markdownToHtml(polishMarkdown);
+                const cleanPolished = extractCleanFromMarkdown(polishMarkdown);
+
+                // Step 2: Humanize the polished text
+                setLoading(true, 'Step 2/2: Humanizing...');
+                outputDiv.innerHTML = '<div style="color: #888; font-style: italic;">Step 2/2: Humanizing... Please wait.</div>';
+
+                const userMessage = `[GENRE: ${genre}]\n\n<text>\n${cleanPolished}\n</text>`;
+                const humanized = await apiProvider.call(HUMANIZE_SYSTEM_PROMPT, userMessage);
+
+                if (!humanized || !humanized.trim()) {
+                    outputDiv.innerHTML = '<div style="color: #ff9800;">No response from humanize step. Polish result was obtained successfully.</div>';
+                    setOutput(polishHtml, cleanPolished, false);
+                    return;
+                }
+
+                // Show humanized result by default, toggle can show polish marks
+                setOutput(polishHtml, humanized, true);
+                saveToHistory(inputText, polishHtml, settings, 'polish+humanize');
+
+            } catch (error) {
+                outputDiv.innerHTML = '';
+                showError(error.message);
+                console.error('Polish & Humanize error:', error);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        function copyCleanText(btn) {
+            // Use stored plain text if available, otherwise extract from DOM
+            let cleanText;
+            if (outputView.plain) {
+                cleanText = outputView.plain;
+            } else {
+                const outputDiv = document.getElementById('output');
+                if (!outputDiv.textContent.trim()) {
+                    showError('No output to copy');
+                    return;
+                }
+                const clone = outputDiv.cloneNode(true);
+                clone.querySelectorAll('s').forEach(s => s.replaceWith(' '));
+                cleanText = clone.textContent.replace(/ {2,}/g, ' ');
+            }
 
             // Copy using fallback method (works on file:// protocol)
             const textarea = document.createElement('textarea');
@@ -1066,7 +1460,7 @@ Polished version:`;
         }
 
         // History Management
-        function saveToHistory(original, polished, settings) {
+        function saveToHistory(original, polished, settings, action = 'polish') {
             const history = getHistory();
 
             // Get clean text
@@ -1081,6 +1475,7 @@ Polished version:`;
                 original,
                 polished,
                 cleanText,
+                action,
                 provider: document.getElementById('provider').value,
                 model: document.getElementById('model').value,
                 settings: {
@@ -1128,7 +1523,7 @@ Polished version:`;
                         <div class="history-timestamp">${date.toLocaleString()}</div>
                         <div class="history-preview">${escapeHtml(preview)}</div>
                         <div class="history-meta">
-                            ${entry.provider} / ${entry.model} |
+                            ${entry.action || 'polish'} | ${entry.provider} / ${entry.model} |
                             ${entry.settings.language} |
                             ${entry.settings.register} |
                             ${entry.settings.intensity}
