@@ -454,6 +454,11 @@
                             <input type="text" id="base-url" placeholder="API endpoint URL">
                         </div>
                     </div>
+                    <div id="ollama-tip" style="margin-top: 10px; padding: 8px 12px; background: #2a2000; border: 1px solid #554400; border-radius: 6px; font-size: 0.85em; color: #ccaa44; display: none;">
+                        💡 <strong>Tip:</strong> If opened via file://, Ollama blocks requests (CORS). Either:<br>
+                        • Restart Ollama: <code style="background:#333;padding:2px 5px;border-radius:3px;">OLLAMA_ORIGINS=* ollama serve</code><br>
+                        • Or serve this file: <code style="background:#333;padding:2px 5px;border-radius:3px;">python3 -m http.server 8000</code> then open <code style="background:#333;padding:2px 5px;border-radius:3px;">http://localhost:8000</code>
+                    </div>
                     <div style="margin-top: 15px;">
                         <button class="secondary" onclick="verifyAPI()">Verify API Connection</button>
                         <span id="api-status" style="margin-left: 10px;"></span>
@@ -708,8 +713,10 @@ Rewrite the text now according to these instructions. Output only the rewritten 
             const apiKeyInput = document.getElementById('api-key');
             const baseUrlInput = document.getElementById('base-url');
 
+            const ollamaTip = document.getElementById('ollama-tip');
             if (currentProvider === 'local') {
                 apiKeyGroup.style.display = 'none';
+                ollamaTip.style.display = (window.location.protocol === 'file:') ? 'block' : 'none';
                 // Set default API key for local provider (Ollama doesn't need auth but some code expects a value)
                 if (!apiKeyInput.value) {
                     apiKeyInput.value = 'ollama';
@@ -720,6 +727,7 @@ Rewrite the text now according to these instructions. Output only the rewritten 
                 baseUrlInput.placeholder = 'http://localhost:11434/v1';
             } else {
                 apiKeyGroup.style.display = 'block';
+                ollamaTip.style.display = 'none';
 
                 switch(currentProvider) {
                     case 'openai':
@@ -963,17 +971,22 @@ Polish intensity: ${intensityLevel}
 
 ${intensityGuidance}${registerGuidance}
 
-Show ALL changes using markdown markup:
+IMPORTANT: First assess whether the text actually needs revision. If the writing is already clear, correct, and appropriate for the target style, return the original text exactly as-is without any markup. Do NOT make unnecessary changes just because a higher intensity was selected — only revise if there are genuine issues to fix.
+
+If revision IS needed, show ALL changes using markdown markup:
 - Words/phrases you ADD: **added text**
 - Words/phrases you DELETE: ~~deleted text~~
 - Sentences you COMPLETELY REPHRASE: ***entire rephrased sentence***
 
-CRITICAL: You must show ALL edits with the markdown markup above. Do not output clean text without markup.
+CRITICAL OUTPUT FORMAT RULES:
+1. Output ONLY the polished text (with markup if changes were made). Nothing else.
+2. Do NOT include any preamble like "Here is the polished version:" or "Polished version with markup:".
+3. Do NOT include a clean version, summary, or explanation after the text.
+4. Do NOT add any commentary before or after the text.
+5. Your entire response must be the text itself and nothing more.
 
 Text to polish:
-${text}
-
-Polished version with markup:`;
+${text}`;
             }
         }
 
@@ -986,7 +999,7 @@ Polished version with markup:`;
                 const prompt = this.buildPrompt(text, settings);
 
                 const messages = [
-                    { role: 'system', content: 'You are a professional language editor. Output in markdown format as instructed.' },
+                    { role: 'system', content: 'You are a professional language editor. Output ONLY the polished text with markdown markup for changes. Never include preamble, commentary, clean versions, or explanations — just the text itself.' },
                     { role: 'user', content: prompt }
                 ];
 
@@ -1002,7 +1015,7 @@ Polished version with markup:`;
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
-                        temperature: 0.3
+                        temperature: 0.2
                     })
                 });
 
@@ -1042,7 +1055,7 @@ Polished version with markup:`;
                             { role: 'system', content: systemPrompt },
                             { role: 'user', content: userMessage }
                         ],
-                        temperature: 0.3
+                        temperature: 0.6
                     })
                 });
                 if (!response.ok) {
@@ -1075,7 +1088,8 @@ Polished version with markup:`;
                             parts: [{
                                 text: prompt
                             }]
-                        }]
+                        }],
+                        generationConfig: { temperature: 0.2 }
                     })
                 });
 
@@ -1102,7 +1116,10 @@ Polished version with markup:`;
                 const model = this.config.model;
                 const baseUrl = (this.config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
                 const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
-                const body = { contents: [{ parts: [{ text: userMessage }] }] };
+                const body = {
+                    contents: [{ parts: [{ text: userMessage }] }],
+                    generationConfig: { temperature: 0.6 }
+                };
                 if (systemPrompt) {
                     body.systemInstruction = { parts: [{ text: systemPrompt }] };
                 }
@@ -1128,7 +1145,7 @@ Polished version with markup:`;
                 const prompt = this.buildPrompt(text, settings);
 
                 const messages = [
-                    { role: 'system', content: 'You are a professional language editor. Output in markdown format as instructed.' },
+                    { role: 'system', content: 'You are a professional language editor. Output ONLY the polished text with markdown markup for changes. Never include preamble, commentary, clean versions, or explanations — just the text itself.' },
                     { role: 'user', content: prompt }
                 ];
 
@@ -1140,15 +1157,24 @@ Polished version with markup:`;
 
                 console.log('Local request to:', targetUrl);
 
-                const response = await fetch(targetUrl, {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages,
-                        temperature: 0.3
-                    })
-                });
+                let response;
+                try {
+                    response = await fetch(targetUrl, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({
+                            model: model,
+                            messages: messages,
+                            temperature: 0.2
+                        })
+                    });
+                } catch (networkError) {
+                    console.error('Network/CORS error:', networkError);
+                    if (window.location.protocol === 'file:') {
+                        throw new Error('CORS blocked: Opening this file directly (file://) prevents connecting to Ollama. Fix: run "OLLAMA_ORIGINS=* ollama serve" or serve this file via a local HTTP server (e.g. "python3 -m http.server 8000" then open http://localhost:8000).');
+                    }
+                    throw new Error(`Cannot connect to ${targetUrl}. Make sure Ollama is running and the URL is correct. If CORS is the issue, restart Ollama with: OLLAMA_ORIGINS=* ollama serve`);
+                }
 
                 if (!response.ok) {
                     const error = await response.text();
@@ -1177,18 +1203,27 @@ Polished version with markup:`;
                 if (this.config.apiKey && this.config.apiKey !== 'ollama') {
                     headers['Authorization'] = `Bearer ${this.config.apiKey}`;
                 }
-                const response = await fetch(targetUrl, {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        model: model,
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            { role: 'user', content: userMessage }
-                        ],
-                        temperature: 0.3
-                    })
-                });
+                let response;
+                try {
+                    response = await fetch(targetUrl, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({
+                            model: model,
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: userMessage }
+                            ],
+                            temperature: 0.6
+                        })
+                    });
+                } catch (networkError) {
+                    console.error('Network/CORS error:', networkError);
+                    if (window.location.protocol === 'file:') {
+                        throw new Error('CORS blocked: Opening this file directly (file://) prevents connecting to Ollama. Fix: run "OLLAMA_ORIGINS=* ollama serve" or serve this file via a local HTTP server (e.g. "python3 -m http.server 8000" then open http://localhost:8000).');
+                    }
+                    throw new Error(`Cannot connect to ${targetUrl}. Make sure Ollama is running and the URL is correct. If CORS is the issue, restart Ollama with: OLLAMA_ORIGINS=* ollama serve`);
+                }
                 if (!response.ok) {
                     const error = await response.text();
                     throw new Error(`Local API Error: ${response.status} - ${error}`);
@@ -1250,6 +1285,17 @@ Polished version with markup:`;
                 register: parseInt(document.getElementById('register').value),
                 intensity: parseInt(document.getElementById('intensity').value)
             };
+        }
+
+        function stripAIPreamble(markdown) {
+            let text = markdown;
+            // Remove common preamble lines the AI might add
+            text = text.replace(/^(?:(?:Here(?:'s| is) (?:the |your )?)?(?:polished|revised|edited|corrected|improved|updated|rewritten)[\s\S]*?(?:markup|version|text|changes)?[:\-]\s*\n+)/i, '');
+            // Remove trailing clean version sections
+            text = text.replace(/\n+(?:---+\s*\n+)?(?:(?:Clean|Plain|Final|Unmarked|Readable)\s+(?:version|text|copy)[\s\S]*$)/i, '');
+            // Remove trailing explanations/notes
+            text = text.replace(/\n+(?:(?:Note|Summary|Explanation|Changes made|Key changes|I (?:made|didn't|did not))[\s\S]*$)/i, '');
+            return text.trim();
         }
 
         function extractCleanFromMarkdown(markdown) {
@@ -1316,13 +1362,16 @@ Polished version with markup:`;
 
                 await apiProvider.polish(inputText, settings, (result) => {
                     fullMarkdown = result;
-                    outputDiv.innerHTML = markdownToHtml(fullMarkdown);
+                    outputDiv.innerHTML = markdownToHtml(stripAIPreamble(fullMarkdown));
                 });
 
                 if (!fullMarkdown || !fullMarkdown.trim()) {
                     outputDiv.innerHTML = '<div style="color: #ff9800;">No response received from the API. Please check your settings and try again.</div>';
                     return;
                 }
+
+                // Strip any preamble/postamble the AI may have added
+                fullMarkdown = stripAIPreamble(fullMarkdown);
 
                 const fullHtml = markdownToHtml(fullMarkdown);
                 const cleanText = extractCleanFromMarkdown(fullMarkdown);
@@ -1390,7 +1439,7 @@ Polished version with markup:`;
                 let polishMarkdown = '';
                 await apiProvider.polish(inputText, settings, (result) => {
                     polishMarkdown = result;
-                    outputDiv.innerHTML = markdownToHtml(polishMarkdown);
+                    outputDiv.innerHTML = markdownToHtml(stripAIPreamble(polishMarkdown));
                 });
 
                 if (!polishMarkdown || !polishMarkdown.trim()) {
@@ -1398,6 +1447,7 @@ Polished version with markup:`;
                     return;
                 }
 
+                polishMarkdown = stripAIPreamble(polishMarkdown);
                 const polishHtml = markdownToHtml(polishMarkdown);
                 const cleanPolished = extractCleanFromMarkdown(polishMarkdown);
 

@@ -56,6 +56,20 @@ A single-file, AI-powered language polishing and humanization tool. Paste your t
 5. Enter your model name (e.g., `qwen3-vl:30b`)
 6. Start processing!
 
+> **Note on CORS:** Browsers block requests from `file://` pages to localhost. If you open `text-baker.html` directly, Ollama calls will fail. Fix with one of:
+> - Restart Ollama with: `OLLAMA_ORIGINS=* ollama serve`
+> - Or serve the file locally: `python3 -m http.server 8000` then open `http://localhost:8000/text-baker.html`
+
+## 🌡️ Adaptive Temperature
+
+Temperature is set automatically per task for optimal results:
+
+| Mode | Temperature | Rationale |
+|------|------------|-----------|
+| **Polish** | 0.2 | Predictable, faithful corrections |
+| **Humanize** | 0.6 | Creative freedom for natural phrasing |
+| **Polish & Humanize** | 0.2 → 0.6 | Polish first, then humanize |
+
 ## 🎨 Style & Register Options
 
 - **Formal** → Semi-formal → **Neutral** → Semi-casual → **Casual** → **Technical**
