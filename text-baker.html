@@ -1413,6 +1413,11 @@ ${text}`;
                 // Strip any preamble/postamble the AI may have added
                 fullMarkdown = stripAIPreamble(fullMarkdown);
 
+                // Fallback: if model returned no markup (common with Ollama), compute diff
+                if (!/\*\*|~~/.test(fullMarkdown)) {
+                    fullMarkdown = wordDiffToMarkdown(inputText, fullMarkdown);
+                }
+
                 const fullHtml = markdownToHtml(fullMarkdown);
                 const cleanText = extractCleanFromMarkdown(fullMarkdown);
                 setOutput(fullHtml, cleanText, false);
@@ -1488,6 +1493,12 @@ ${text}`;
                 }
 
                 polishMarkdown = stripAIPreamble(polishMarkdown);
+
+                // Fallback: if model returned no markup (common with Ollama), compute diff
+                if (!/\*\*|~~/.test(polishMarkdown)) {
+                    polishMarkdown = wordDiffToMarkdown(inputText, polishMarkdown);
+                }
+
                 const polishHtml = markdownToHtml(polishMarkdown);
                 const cleanPolished = extractCleanFromMarkdown(polishMarkdown);
 
@@ -1666,6 +1677,71 @@ ${text}`;
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Word-level LCS diff — used as fallback when the AI returns plain text (no markup)
+        function wordDiff(origText, newText) {
+            const origWords = origText.trim().split(/\s+/);
+            const newWords  = newText.trim().split(/\s+/);
+            const m = origWords.length, n = newWords.length;
+
+            // Build LCS table
+            const dp = Array.from({length: m + 1}, () => new Array(n + 1).fill(0));
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    dp[i][j] = origWords[i-1] === newWords[j-1]
+                        ? dp[i-1][j-1] + 1
+                        : Math.max(dp[i-1][j], dp[i][j-1]);
+                }
+            }
+
+            // Backtrack
+            const ops = [];
+            for (let i = m, j = n; i > 0 || j > 0;) {
+                if (i > 0 && j > 0 && origWords[i-1] === newWords[j-1]) {
+                    ops.unshift({t: 0, w: newWords[j-1]}); i--; j--;
+                } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+                    ops.unshift({t: 1, w: newWords[j-1]}); j--;
+                } else {
+                    ops.unshift({t: -1, w: origWords[i-1]}); i--;
+                }
+            }
+
+            // Build markdown
+            let result = '', k = 0;
+            while (k < ops.length) {
+                if (ops[k].t === 0) {
+                    result += ops[k].w + ' ';
+                    k++;
+                } else {
+                    const dels = [], ins = [];
+                    while (k < ops.length && ops[k].t !== 0) {
+                        if (ops[k].t === -1) dels.push(ops[k].w);
+                        else ins.push(ops[k].w);
+                        k++;
+                    }
+                    if (dels.length) result += '~~' + dels.join(' ') + '~~ ';
+                    if (ins.length)  result += '**' + ins.join(' ')  + '** ';
+                }
+            }
+            return result.trim();
+        }
+
+        // Compute diff markup from original vs AI-polished text (paragraph-aware)
+        function wordDiffToMarkdown(original, polished) {
+            if (/\*\*|~~/.test(polished)) return polished;          // Already has markup
+            if (original.trim() === polished.trim()) return polished; // No changes
+
+            const origParas = original.split(/\n/);
+            const newParas  = polished.split(/\n/);
+
+            if (origParas.length === newParas.length) {
+                return origParas.map((op, i) => {
+                    const np = newParas[i];
+                    return op.trim() === np.trim() ? np : wordDiff(op, np);
+                }).join('\n');
+            }
+            return wordDiff(original, polished); // Paragraph count changed — diff whole text
         }
 
         function markdownToHtml(markdown) {
