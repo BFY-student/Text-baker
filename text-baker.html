@@ -207,6 +207,36 @@
             background: #666;
         }
 
+        .view-toggle {
+            display: flex;
+            background: #1a1a1a;
+            border-radius: 5px;
+            overflow: hidden;
+            border: 1px solid #444;
+        }
+
+        .view-btn {
+            background: transparent;
+            color: #aaa;
+            border: none;
+            padding: 6px 14px;
+            font-size: 0.85em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 0;
+        }
+
+        .view-btn:hover {
+            background: #2a2a2a;
+            color: #e0e0e0;
+        }
+
+        .view-btn.active {
+            background: #4a9eff;
+            color: #fff;
+        }
+
         button.danger {
             background: #d32f2f;
         }
@@ -516,9 +546,12 @@
             <div class="panel">
                 <div class="section-title">
                     <h3>Output</h3>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="secondary" id="toggle-marks-btn" onclick="toggleRevisionMarks()" style="display: none;">Show Plain</button>
-                        <button class="secondary" id="copy-btn" onclick="copyCleanText(this)">Copy Clean Text</button>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div class="view-toggle" id="view-toggle" style="display: none;">
+                            <button class="view-btn active" id="btn-tracked" onclick="setViewMode('marked')">Tracked Changes</button>
+                            <button class="view-btn" id="btn-plain" onclick="setViewMode('plain')">Clean Text</button>
+                        </div>
+                        <button class="secondary" id="copy-btn" onclick="copyCurrentView(this)">Copy</button>
                     </div>
                 </div>
                 <div class="output-area revision-mark" id="output"></div>
@@ -902,7 +935,9 @@ Rewrite the text now according to these instructions. Output only the rewritten 
             document.getElementById('output').innerHTML = '';
             outputView = { marked: '', plain: '' };
             isPlainView = false;
-            document.getElementById('toggle-marks-btn').style.display = 'none';
+            document.getElementById('view-toggle').style.display = 'none';
+            document.getElementById('btn-tracked').classList.add('active');
+            document.getElementById('btn-plain').classList.remove('active');
         }
 
         function showError(message) {
@@ -1316,33 +1351,38 @@ ${text}`;
             outputView.plain = plainText;
             isPlainView = startWithPlain;
 
+            // Only show the view toggle when there are actual tracked changes (<b> or <s> elements)
+            const hasTrackedChanges = /<b>|<s>/i.test(markedHtml);
+            document.getElementById('view-toggle').style.display = hasTrackedChanges ? 'flex' : 'none';
+
+            // Render the selected initial view
             const outputDiv = document.getElementById('output');
-            const toggleBtn = document.getElementById('toggle-marks-btn');
-
-            // Check if marked and plain views actually differ
             const plainHtml = escapeHtml(plainText).replace(/\n/g, '<br>');
-            const hasDiff = markedHtml !== plainHtml;
-            toggleBtn.style.display = hasDiff ? 'inline-block' : 'none';
-
             if (isPlainView) {
                 outputDiv.innerHTML = plainHtml;
-                toggleBtn.textContent = 'Show Marks';
+                document.getElementById('btn-tracked').classList.remove('active');
+                document.getElementById('btn-plain').classList.add('active');
             } else {
                 outputDiv.innerHTML = markedHtml;
-                toggleBtn.textContent = 'Show Plain';
+                document.getElementById('btn-tracked').classList.add('active');
+                document.getElementById('btn-plain').classList.remove('active');
             }
         }
 
-        function toggleRevisionMarks() {
-            isPlainView = !isPlainView;
+        function setViewMode(mode) {
             const outputDiv = document.getElementById('output');
-            const toggleBtn = document.getElementById('toggle-marks-btn');
-            if (isPlainView) {
+            const btnTracked = document.getElementById('btn-tracked');
+            const btnPlain = document.getElementById('btn-plain');
+            if (mode === 'plain') {
+                isPlainView = true;
                 outputDiv.innerHTML = escapeHtml(outputView.plain).replace(/\n/g, '<br>');
-                toggleBtn.textContent = 'Show Marks';
+                btnTracked.classList.remove('active');
+                btnPlain.classList.add('active');
             } else {
+                isPlainView = false;
                 outputDiv.innerHTML = outputView.marked;
-                toggleBtn.textContent = 'Show Plain';
+                btnTracked.classList.add('active');
+                btnPlain.classList.remove('active');
             }
         }
 
@@ -1477,8 +1517,8 @@ ${text}`;
             }
         }
 
-        function copyCleanText(btn) {
-            // Use stored plain text if available, otherwise extract from DOM
+        function copyCurrentView(btn) {
+            // Always copy clean text (plain version without revision marks)
             let cleanText;
             if (outputView.plain) {
                 cleanText = outputView.plain;
